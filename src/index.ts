@@ -283,13 +283,58 @@ async function getGasPrice(web3: Web3, multiplier: number): Promise<string> {
   }
 }
 
+async function verifySendTransactionTask(
+  address: string,
+  txHash: string,
+  jwtToken: string
+): Promise<void> {
+  console.log({
+    address,
+    txHash,
+    jwtToken,
+  });
+  try {
+    const response = await fetch(
+      `${PHAROS_CONFIG.API_BASE_URL}/task/verify?address=${address}&task_id=103&tx_hash=${txHash}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${jwtToken}`,
+          Referer: PHAROS_CONFIG.TESTNET_URL,
+        },
+      }
+    );
+
+    const responseJson = await response.json();
+    console.log("response json", responseJson);
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    if (responseJson.code === 0 && responseJson.verified) {
+      console.log(
+        kleur.green("✅ Task verification successful! Transaction sent.")
+      );
+    } else {
+      console.log(
+        kleur.red(
+          `❌ Task verification failed: ${responseJson.code} - ${responseJson.message}`
+        )
+      );
+    }
+  } catch (error) {
+    console.error(kleur.red("❌ Error sending transaction:"), error);
+  }
+}
+
 async function sendEthTransaction(
   web3: Web3,
   account: Web3Account,
   toAddress: string,
   amount: string,
   accountIndex: number,
-  gasPriceMultiplier: number
+  gasPriceMultiplier: number,
+  jwtToken?: string
 ): Promise<SendEthResult> {
   try {
     const amountWei = Web3.utils.toWei(amount, "ether");
@@ -331,6 +376,27 @@ async function sendEthTransaction(
     );
     console.log(kleur.gray(`   🔗 Explorer: ${txUrl}`));
 
+    if (jwtToken) {
+      console.log(kleur.blue(`   🔄 Verifying transaction...`));
+      try {
+        await verifySendTransactionTask(
+          account.address,
+          receipt.transactionHash as string,
+          jwtToken
+        );
+        console.log(kleur.green(`   ✅ Transaction verification completed`));
+      } catch (verifyError: any) {
+        console.log(
+          kleur.yellow(
+            `   ⚠️ Transaction verification failed: ${verifyError.message}`
+          )
+        );
+      }
+    } else {
+      console.log(
+        kleur.gray(`   ⚠️ Skipping verification - No JWT token available`)
+      );
+    }
     return {
       fromAddress: account.address,
       toAddress: toAddress,
@@ -352,7 +418,7 @@ async function sendEthTransaction(
 
 async function performAutoSendEth(
   web3: Web3,
-  accounts: Web3Account[],
+  accountsAuth: AccountAuth[],
   config: AppConfig
 ): Promise<void> {
   if (!config.autoSendEnabled) {
@@ -362,7 +428,6 @@ async function performAutoSendEth(
   console.log(kleur.cyan().bold("\n💸 Starting Auto Send ETH Process"));
   console.log("━".repeat(50));
 
-  // Generate random target addresses
   const targetAddresses = generateRandomAddresses(config.targetAddressCount);
 
   console.log(
@@ -379,11 +444,14 @@ async function performAutoSendEth(
   let totalSent = 0;
   let successCount = 0;
 
-  for (let accIndex = 0; accIndex < accounts.length; accIndex++) {
-    const account = accounts[accIndex];
+  for (let accIndex = 0; accIndex < accountsAuth.length; accIndex++) {
+    const accountAuth = accountsAuth[accIndex];
+    const account = accountAuth.account;
 
     console.log(
-      kleur.blue(`\n👤 Processing Account ${accIndex + 1}/${accounts.length}`)
+      kleur.blue(
+        `\n👤 Processing Account ${accIndex + 1}/${accountsAuth.length}`
+      )
     );
     console.log(kleur.gray(`   Address: ${account.address}`));
 
@@ -433,7 +501,8 @@ async function performAutoSendEth(
           targetAddress,
           config.sendAmount,
           accIndex,
-          config.gasPriceMultiplier
+          config.gasPriceMultiplier,
+          accountAuth.jwtToken
         );
 
         results.push(result);
@@ -461,7 +530,7 @@ async function performAutoSendEth(
       }
     }
 
-    if (accIndex < accounts.length - 1) {
+    if (accIndex < accountsAuth.length - 1) {
       console.log(
         kleur.gray(`   ⏳ Waiting 10 seconds before next account...`)
       );
@@ -896,8 +965,7 @@ async function runTransactions(
   );
 
   if (config.autoSendEnabled) {
-    const accounts = accountsAuth.map((auth) => auth.account);
-    await performAutoSendEth(web3, accounts, config);
+    await performAutoSendEth(web3, accountsAuth, config);
     await delay(1000);
   }
 }
