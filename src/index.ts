@@ -288,11 +288,7 @@ async function verifySendTransactionTask(
   txHash: string,
   jwtToken: string
 ): Promise<void> {
-  console.log({
-    address,
-    txHash,
-    jwtToken,
-  });
+  
   try {
     const response = await fetch(
       `${PHAROS_CONFIG.API_BASE_URL}/task/verify?address=${address}&task_id=103&tx_hash=${txHash}`,
@@ -306,7 +302,6 @@ async function verifySendTransactionTask(
     );
 
     const responseJson = await response.json();
-    console.log("response json", responseJson);
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
